@@ -1,0 +1,81 @@
+import 'package:path/path.dart';
+import 'package:sqflite/sqflite.dart';
+
+/// Handles SQLite database creation, seeding, and food item queries.
+class DatabaseHelper {
+  static final DatabaseHelper instance = DatabaseHelper._init();
+  static Database? _database;
+
+  DatabaseHelper._init();
+
+  /// Returns the existing database or opens/creates a new one.
+  Future get database async {
+    if (_database != null) return _database!;
+    _database = await _initDB('shawarma_palace.db');
+    return _database!;
+  }
+
+  Future _initDB(String filePath) async {
+    final dbPath = await getDatabasesPath();
+    final path = join(dbPath, filePath);
+
+    return await openDatabase(
+      path,
+      version: 1,
+      onCreate: _createDB,
+    );
+  }
+
+  /// Creates tables and seeds 20 initial food items on first install.
+  Future _createDB(Database db, int version) async {
+    await db.execute('''
+      CREATE TABLE food_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        cost REAL NOT NULL
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE order_plans (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        date TEXT NOT NULL,
+        items TEXT NOT NULL,
+        total_cost REAL NOT NULL
+      )
+    ''');
+
+    final initialMenu = [
+      {'name': 'Chicken Shawarma Wrap', 'cost': 9.99},
+      {'name': 'Beef Shawarma Wrap', 'cost': 10.99},
+      {'name': 'Mixed Shawarma Wrap', 'cost': 11.49},
+      {'name': 'Falafel Wrap', 'cost': 8.49},
+      {'name': 'Chicken Shawarma Platter', 'cost': 16.99},
+      {'name': 'Beef Shawarma Platter', 'cost': 17.99},
+      {'name': 'Mixed Shawarma Platter', 'cost': 18.99},
+      {'name': 'Falafel Platter', 'cost': 14.99},
+      {'name': 'Chicken on the Rocks', 'cost': 13.99},
+      {'name': 'Beef on the Rocks', 'cost': 14.99},
+      {'name': 'Chicken on the Sticks', 'cost': 13.99},
+      {'name': 'Lentil Soup', 'cost': 5.49},
+      {'name': 'Fattoush Salad', 'cost': 7.99},
+      {'name': 'Tabbouleh Salad', 'cost': 7.49},
+      {'name': 'Hummus with Pita', 'cost': 6.99},
+      {'name': 'Baba Ganoush with Pita', 'cost': 7.49},
+      {'name': 'Garlic Potatoes', 'cost': 6.49},
+      {'name': 'Crispy French Fries', 'cost': 4.99},
+      {'name': 'Baklava (2 pcs)', 'cost': 3.99},
+      {'name': 'Mango Juice', 'cost': 3.49},
+    ];
+
+    for (final item in initialMenu) {
+      await db.insert('food_items', item);
+    }
+  }
+
+  /// Fetches all food items from the database.
+  Future getAllFoodItems() async {
+    final db = await instance.database;
+    return await db.query('food_items', orderBy: 'id ASC');
+  }
+}

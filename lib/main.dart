@@ -1,9 +1,16 @@
 import 'package:flutter/material.dart';
+import 'database_helper.dart';
+import 'dart:io';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
   runApp(const RestaurantApp());
 }
-
 /// Root widget that configures the restaurant's name and color theme.
 class RestaurantApp extends StatelessWidget {
   const RestaurantApp({super.key});
@@ -15,9 +22,9 @@ class RestaurantApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFB71C1C), // Deep Red
+          seedColor: const Color(0xFFB71C1C),
           primary: const Color(0xFFB71C1C),
-          secondary: const Color(0xFFFFB300), // Warm Gold
+          secondary: const Color(0xFFFFB300),
         ),
         appBarTheme: const AppBarTheme(
           backgroundColor: Color(0xFFB71C1C),
@@ -31,9 +38,32 @@ class RestaurantApp extends StatelessWidget {
   }
 }
 
-/// Main landing screen for the food ordering app.
-class HomeScreen extends StatelessWidget {
+/// Main screen displaying the seeded restaurant menu from SQLite.
+class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
+
+  @override
+  State createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State {
+  List _foodItems = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMenu();
+  }
+
+  /// Loads all seeded food items from the local SQLite database.
+  Future _loadMenu() async {
+    final items = await DatabaseHelper.instance.getAllFoodItems();
+    setState(() {
+      _foodItems = items;
+      _isLoading = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -48,20 +78,28 @@ class HomeScreen extends StatelessWidget {
           ],
         ),
       ),
-      body: const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.fastfood, size: 80, color: Color(0xFFB71C1C)),
-            SizedBox(height: 16),
-            Text(
-              'Welcome to Shawarma Palace',
-              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView.builder(
+        itemCount: _foodItems.length,
+        itemBuilder: (context, index) {
+          final item = _foodItems[index];
+          return ListTile(
+            leading: CircleAvatar(
+              backgroundColor: const Color(0xFFB71C1C),
+              foregroundColor: Colors.white,
+              child: Text('${index + 1}'),
             ),
-            SizedBox(height: 8),
-            Text('Plan your daily meal order within your budget.'),
-          ],
-        ),
+            title: Text(item['name']),
+            trailing: Text(
+              '\$${(item['cost'] as num).toStringAsFixed(2)}',
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+          );
+        },
       ),
     );
   }
