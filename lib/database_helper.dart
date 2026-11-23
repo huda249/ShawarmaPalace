@@ -1,7 +1,7 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
-/// Handles SQLite database creation, seeding, and food item queries.
+/// Handles SQLite database creation, seeding, food items, and order plans.
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
@@ -73,9 +73,36 @@ class DatabaseHelper {
     }
   }
 
-  /// Fetches all food items from the database.
+  /// Fetches all food items from the local database.
   Future getAllFoodItems() async {
     final db = await instance.database;
     return await db.query('food_items', orderBy: 'id ASC');
+  }
+
+  /// Inserts a new saved order plan into the local database.
+  Future insertOrderPlan(String date, String items, double totalCost) async {
+    final db = await instance.database;
+    return await db.insert('order_plans', {
+      'date': date,
+      'items': items,
+      'total_cost': totalCost,
+    });
+  }
+
+  /// Fetches all saved order plans ordered by date descending.
+  Future getAllOrderPlans() async {
+    final db = await instance.database;
+    return await db.query('order_plans', orderBy: 'date DESC, id DESC');
+  }
+
+  /// Queries saved order plans matching a specific date (YYYY-MM-DD).
+  Future getOrderPlansByDate(String date) async {
+    final db = await instance.database;
+    return await db.query(
+      'order_plans',
+      where: 'date = ?',
+      whereArgs: [date],
+      orderBy: 'id DESC',
+    );
   }
 }

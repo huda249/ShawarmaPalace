@@ -5,7 +5,6 @@ import 'database_helper.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  // Keeps Windows desktop working alongside Android/iOS
   if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
     sqfliteFfiInit();
     databaseFactory = databaseFactoryFfi;
@@ -40,7 +39,7 @@ class RestaurantApp extends StatelessWidget {
   }
 }
 
-/// Main screen for setting a daily budget, picking a date, and selecting food.
+/// Main screen for setting a daily budget, selecting food, and saving plans.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -70,12 +69,8 @@ class _HomeScreenState extends State {
     });
   }
 
-  /// Parses the user's target daily budget safely.
-  double get _targetBudget {
-    return double.tryParse(_budgetController.text) ?? 0.0;
-  }
+  double get _targetBudget => double.tryParse(_budgetController.text) ?? 0.0;
 
-  /// Calculates the total cost of all currently checked food items.
   double get _currentTotal {
     double total = 0.0;
     for (final item in _foodItems) {
@@ -86,7 +81,10 @@ class _HomeScreenState extends State {
     return total;
   }
 
-  /// Opens the calendar date picker dialog.
+  String _formatDate(DateTime date) {
+    return '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
   Future _pickDate() async {
     final picked = await showDatePicker(
       context: context,
@@ -110,7 +108,6 @@ class _HomeScreenState extends State {
       if (_selectedIds.contains(id)) {
         _selectedIds.remove(id);
       } else {
-        // Check if adding this item exceeds the target cost
         if (_currentTotal + cost > _targetBudget + 0.001) {
           ScaffoldMessenger.of(context).hideCurrentSnackBar();
           ScaffoldMessenger.of(context).showSnackBar(
@@ -128,10 +125,39 @@ class _HomeScreenState extends State {
     });
   }
 
+  /// Saves the selected food items and date into the local SQLite database.
+  Future _saveOrderPlan() async {
+    if (_selectedIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one food item first.')),
+      );
+      return;
+    }
+
+    final selectedNames = _foodItems
+        .where((item) => _selectedIds.contains(item['id']))
+        .map((item) => '${item['name']} (\$${(item['cost'] as num).toStringAsFixed(2)})')
+        .join(', ');
+
+    final dateStr = _formatDate(_selectedDate);
+    await DatabaseHelper.instance.insertOrderPlan(dateStr, selectedNames, _currentTotal);
+
+    setState(() {
+      _selectedIds.clear();
+    });
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Order plan saved for $dateStr!'),
+        backgroundColor: Colors.green.shade700,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final formattedDate =
-        '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}-${_selectedDate.day.toString().padLeft(2, '0')}';
+    final formattedDate = _formatDate(_selectedDate);
 
     return Scaffold(
       appBar: AppBar(
@@ -143,12 +169,23 @@ class _HomeScreenState extends State {
             Text('Shawarma Palace'),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'View & Query Order Plans',
+            icon: const Icon(Icons.history),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const OrderPlansScreen()),
+              );
+            },
+          ),
+        ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Column(
         children: [
-          // Budget & Date Control Panel
           Container(
             padding: const EdgeInsets.all(12),
             color: Colors.amber.shade50,
@@ -194,11 +231,23 @@ class _HomeScreenState extends State {
                     ),
                   ],
                 ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFB71C1C),
+                      foregroundColor: Colors.white,
+                    ),
+                    onPressed: _saveOrderPlan,
+                    icon: const Icon(Icons.save),
+                    label: const Text('Save Order Plan'),
+                  ),
+                ),
               ],
             ),
           ),
           const Divider(height: 1),
-          // Menu Selection List
           Expanded(
             child: ListView.builder(
               itemCount: _foodItems.length,
@@ -216,6 +265,145 @@ class _HomeScreenState extends State {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// Screen to query order plans by date and list all plans descending by date.
+class OrderPlansScreen extends StatefulWidget {
+  const OrderPlansScreen({super.key});
+
+  @override
+  State createState() => _OrderPlansScreenState();
+}
+
+class _OrderPlansScreenState extends State {
+  List _allPlans = [];
+  List _queryResults = [];
+  String? _searchedDate;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAllPlans();
+  }
+
+  /// Loads all saved order plans ordered by date descending.
+  Future _loadAllPlans() async {
+    final plans = await DatabaseHelper.instance.getAllOrderPlans();
+    setState(() {
+      _allPlans = plans;
+      _isLoading = false;
+    });
+  }
+
+  /// Picks a date and queries the local database for matching order plans.
+  Future _searchByDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null) {
+      final dateStr =
+          '${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}';
+      final results = await DatabaseHelper.instance.getOrderPlansByDate(dateStr);
+      setState(() {
+        _searchedDate = dateStr;
+        _queryResults = results;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: const Text('Saved Order Plans')),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Date Query Section
+            Row(
+              children: [
+                ElevatedButton.icon(
+                  onPressed: _searchByDate,
+                  icon: const Icon(Icons.search),
+                  label: const Text('Query by Date'),
+                ),
+                const SizedBox(width: 12),
+                if (_searchedDate != null)
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _searchedDate = null;
+                        _queryResults = [];
+                      });
+                    },
+                    child: const Text('Clear Search'),
+                  ),
+              ],
+            ),
+            if (_searchedDate != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Query Result for $_searchedDate:',
+                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+              const SizedBox(height: 4),
+              if (_queryResults.isEmpty)
+                Card(
+                  color: Colors.red.shade50,
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text('No order plan found for $_searchedDate.'),
+                  ),
+                )
+              else
+                ..._queryResults.map((plan) => Card(
+                  color: Colors.green.shade50,
+                  child: ListTile(
+                    title: Text('Date: ${plan['date']} — Total: \$${(plan['total_cost'] as num).toStringAsFixed(2)}'),
+                    subtitle: Text(plan['items']),
+                  ),
+                )),
+              const Divider(height: 24),
+            ],
+
+            // All Order Plans (Ordered by Date Descending)
+            const Text(
+              'All Order Plans (Newest First):',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: _allPlans.isEmpty
+                  ? const Center(child: Text('No order plans saved yet.'))
+                  : ListView.builder(
+                itemCount: _allPlans.length,
+                itemBuilder: (context, index) {
+                  final plan = _allPlans[index];
+                  return Card(
+                    child: ListTile(
+                      leading: const Icon(Icons.receipt_long, color: Color(0xFFB71C1C)),
+                      title: Text(
+                        '${plan['date']}  •  \$${(plan['total_cost'] as num).toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.bold),
+                      ),
+                      subtitle: Text(plan['items']),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
