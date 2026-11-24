@@ -39,7 +39,7 @@ class RestaurantApp extends StatelessWidget {
   }
 }
 
-/// Main screen for setting a daily budget, selecting food, and saving plans.
+/// Main screen for managing food items, setting a daily budget, and saving plans.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -60,7 +60,7 @@ class _HomeScreenState extends State {
     _loadMenu();
   }
 
-  /// Loads all seeded food items from the local SQLite database.
+  /// Loads all food items from the local SQLite database.
   Future _loadMenu() async {
     final items = await DatabaseHelper.instance.getAllFoodItems();
     setState(() {
@@ -125,6 +125,68 @@ class _HomeScreenState extends State {
     });
   }
 
+  /// Opens a dialog to add a new food item or update an existing one.
+  Future _showFoodDialog({Map? existingItem}) async {
+    final nameController = TextEditingController(
+      text: existingItem != null ? existingItem['name'] : '',
+    );
+    final costController = TextEditingController(
+      text: existingItem != null ? (existingItem['cost'] as num).toStringAsFixed(2) : '',
+    );
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(existingItem == null ? 'Add Food Item' : 'Update Food Item'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: const InputDecoration(labelText: 'Food Name'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: costController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Cost (\$)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final name = nameController.text.trim();
+              final cost = double.tryParse(costController.text.trim());
+              if (name.isEmpty || cost == null || cost < 0) return;
+
+              if (existingItem == null) {
+                await DatabaseHelper.instance.insertFoodItem(name, cost);
+              } else {
+                await DatabaseHelper.instance.updateFoodItem(existingItem['id'] as int, name, cost);
+              }
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              _loadMenu();
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Deletes a food item from the database and refreshes the list.
+  Future _deleteFood(int id) async {
+    await DatabaseHelper.instance.deleteFoodItem(id);
+    _selectedIds.remove(id);
+    _loadMenu();
+  }
+
   /// Saves the selected food items and date into the local SQLite database.
   Future _saveOrderPlan() async {
     if (_selectedIds.isEmpty) {
@@ -181,6 +243,13 @@ class _HomeScreenState extends State {
             },
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: const Color(0xFFB71C1C),
+        foregroundColor: Colors.white,
+        tooltip: 'Add Food Item',
+        onPressed: () => _showFoodDialog(),
+        child: const Icon(Icons.add),
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
@@ -250,16 +319,35 @@ class _HomeScreenState extends State {
           const Divider(height: 1),
           Expanded(
             child: ListView.builder(
+              padding: const EdgeInsets.only(bottom: 72),
               itemCount: _foodItems.length,
               itemBuilder: (context, index) {
                 final item = _foodItems[index];
                 final isSelected = _selectedIds.contains(item['id']);
-                return CheckboxListTile(
-                  value: isSelected,
-                  activeColor: const Color(0xFFB71C1C),
-                  onChanged: (_) => _toggleItem(item),
+                return ListTile(
+                  leading: Checkbox(
+                    value: isSelected,
+                    activeColor: const Color(0xFFB71C1C),
+                    onChanged: (_) => _toggleItem(item),
+                  ),
                   title: Text(item['name']),
                   subtitle: Text('\$${(item['cost'] as num).toStringAsFixed(2)}'),
+                  onTap: () => _toggleItem(item),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Edit Food Item',
+                        icon: const Icon(Icons.edit, color: Colors.blueGrey),
+                        onPressed: () => _showFoodDialog(existingItem: item),
+                      ),
+                      IconButton(
+                        tooltip: 'Delete Food Item',
+                        icon: const Icon(Icons.delete, color: Colors.red),
+                        onPressed: () => _deleteFood(item['id'] as int),
+                      ),
+                    ],
+                  ),
                 );
               },
             ),
@@ -270,7 +358,7 @@ class _HomeScreenState extends State {
   }
 }
 
-/// Screen to query order plans by date and list all plans descending by date.
+/// Screen to query, edit, delete, and list all saved order plans descending by date.
 class OrderPlansScreen extends StatefulWidget {
   const OrderPlansScreen({super.key});
 
@@ -318,6 +406,82 @@ class _OrderPlansScreenState extends State {
     }
   }
 
+  /// Opens a dialog to update a saved order plan's date, items, or total cost.
+  Future _editOrderPlanDialog(Map plan) async {
+    final dateController = TextEditingController(text: plan['date']);
+    final itemsController = TextEditingController(text: plan['items']);
+    final totalController = TextEditingController(
+      text: (plan['total_cost'] as num).toStringAsFixed(2),
+    );
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Update Order Plan'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: dateController,
+              decoration: const InputDecoration(labelText: 'Date (YYYY-MM-DD)'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: itemsController,
+              maxLines: 2,
+              decoration: const InputDecoration(labelText: 'Food Items'),
+            ),
+            const SizedBox(height: 8),
+            TextField(
+              controller: totalController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Total Cost (\$)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final date = dateController.text.trim();
+              final items = itemsController.text.trim();
+              final total = double.tryParse(totalController.text.trim());
+              if (date.isEmpty || items.isEmpty || total == null) return;
+
+              await DatabaseHelper.instance.updateOrderPlan(
+                plan['id'] as int,
+                date,
+                items,
+                total,
+              );
+              if (!ctx.mounted) return;
+              Navigator.pop(ctx);
+              _loadAllPlans();
+              if (_searchedDate != null) {
+                final refreshed = await DatabaseHelper.instance.getOrderPlansByDate(_searchedDate!);
+                setState(() => _queryResults = refreshed);
+              }
+            },
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Deletes a saved order plan from the local database.
+  Future _deleteOrderPlan(int id) async {
+    await DatabaseHelper.instance.deleteOrderPlan(id);
+    _loadAllPlans();
+    if (_searchedDate != null) {
+      final refreshed = await DatabaseHelper.instance.getOrderPlansByDate(_searchedDate!);
+      setState(() => _queryResults = refreshed);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -329,7 +493,6 @@ class _OrderPlansScreenState extends State {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Date Query Section
             Row(
               children: [
                 ElevatedButton.icon(
@@ -369,14 +532,14 @@ class _OrderPlansScreenState extends State {
                 ..._queryResults.map((plan) => Card(
                   color: Colors.green.shade50,
                   child: ListTile(
-                    title: Text('Date: ${plan['date']} — Total: \$${(plan['total_cost'] as num).toStringAsFixed(2)}'),
+                    title: Text(
+                      'Date: ${plan['date']} — Total: \$${(plan['total_cost'] as num).toStringAsFixed(2)}',
+                    ),
                     subtitle: Text(plan['items']),
                   ),
                 )),
               const Divider(height: 24),
             ],
-
-            // All Order Plans (Ordered by Date Descending)
             const Text(
               'All Order Plans (Newest First):',
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
@@ -397,6 +560,21 @@ class _OrderPlansScreenState extends State {
                         style: const TextStyle(fontWeight: FontWeight.bold),
                       ),
                       subtitle: Text(plan['items']),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Edit Order Plan',
+                            icon: const Icon(Icons.edit, color: Colors.blueGrey),
+                            onPressed: () => _editOrderPlanDialog(plan),
+                          ),
+                          IconButton(
+                            tooltip: 'Delete Order Plan',
+                            icon: const Icon(Icons.delete, color: Colors.red),
+                            onPressed: () => _deleteOrderPlan(plan['id'] as int),
+                          ),
+                        ],
+                      ),
                     ),
                   );
                 },

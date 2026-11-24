@@ -1,7 +1,7 @@
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
-/// Handles SQLite database creation, seeding, food items, and order plans.
+/// Handles SQLite database creation, seeding, and CRUD operations for food items and order plans.
 class DatabaseHelper {
   static final DatabaseHelper instance = DatabaseHelper._init();
   static Database? _database;
@@ -73,11 +73,38 @@ class DatabaseHelper {
     }
   }
 
+  // ---------------- FOOD ITEMS CRUD ----------------
+
   /// Fetches all food items from the local database.
   Future getAllFoodItems() async {
     final db = await instance.database;
     return await db.query('food_items', orderBy: 'id ASC');
   }
+
+  /// Adds a new food item to the menu table.
+  Future insertFoodItem(String name, double cost) async {
+    final db = await instance.database;
+    return await db.insert('food_items', {'name': name, 'cost': cost});
+  }
+
+  /// Updates an existing food item's name and cost.
+  Future updateFoodItem(int id, String name, double cost) async {
+    final db = await instance.database;
+    return await db.update(
+      'food_items',
+      {'name': name, 'cost': cost},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Deletes a food item by its ID.
+  Future deleteFoodItem(int id) async {
+    final db = await instance.database;
+    return await db.delete('food_items', where: 'id = ?', whereArgs: [id]);
+  }
+
+  // ---------------- ORDER PLANS CRUD ----------------
 
   /// Inserts a new saved order plan into the local database.
   Future insertOrderPlan(String date, String items, double totalCost) async {
@@ -104,5 +131,22 @@ class DatabaseHelper {
       whereArgs: [date],
       orderBy: 'id DESC',
     );
+  }
+
+  /// Updates an existing saved order plan.
+  Future updateOrderPlan(int id, String date, String items, double totalCost) async {
+    final db = await instance.database;
+    return await db.update(
+      'order_plans',
+      {'date': date, 'items': items, 'total_cost': totalCost},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+
+  /// Deletes a saved order plan by its ID.
+  Future deleteOrderPlan(int id) async {
+    final db = await instance.database;
+    return await db.delete('order_plans', where: 'id = ?', whereArgs: [id]);
   }
 }
